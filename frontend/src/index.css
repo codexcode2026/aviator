@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0e0e10;
+  --color-panel: #1b1c20;
+  --color-panel-2: #141518;
+  --color-panel-3: #2c2d30;
+  --color-line: #2a2b2f;
+  --color-brand: #e50539;
+  --color-green: #28a909;
+  --color-green-2: #34b94a;
+  --color-orange: #ff9028;
+  --color-balance: #1ad65d;
+  --color-low: #34b4ff;
+  --color-mid: #913ef8;
+  --color-high: #c017b4;
+  --font-sans: "Rubik", system-ui, Arial, sans-serif;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-bg);
+  color: #fff;
+  font-family: var(--font-sans);
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Hide scrollbars but keep scroll */
+.scroll-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: #3a3b40;
+  border-radius: 999px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes propeller-spin {
+  to {
+    transform: rotateY(180deg);
+  }
+}
+
+@keyframes dots-flash {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.loading-dot {
+  animation: dots-flash 1s infinite;
+}
+
+.spribe-dots span {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f01d14;
+  animation: spribe-dot 0.9s infinite ease-in-out;
+}
+.spribe-dots span:nth-child(1) {
+  animation-name: spribe-dot-1;
+}
+.spribe-dots span:nth-child(2) {
+  animation-name: spribe-dot-2;
+}
+.spribe-dots span:nth-child(3) {
+  animation-name: spribe-dot-3;
+}
+
+@keyframes spribe-dot-1 {
+  0%, 33% { transform: translateX(-4px) scale(0.33); opacity: 0.5; }
+  100% { transform: translateX(11px) scale(1); opacity: 1; }
+}
+@keyframes spribe-dot-2 {
+  0%, 33% { transform: translateX(11px) scale(1); opacity: 1; }
+  100% { transform: translateX(26px) scale(0.33); opacity: 0.5; }
+}
+@keyframes spribe-dot-3 {
+  0%, 33% { transform: translateX(26px) scale(0.33); opacity: 0.5; }
+  100% { transform: translateX(-4px) scale(0.33); opacity: 0.5; }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.text-stroke-dark {
+  text-shadow:
+    0 2px 14px rgba(0, 0, 0, 0.6),
+    0 0 2px rgba(0, 0, 0, 0.4);
+}

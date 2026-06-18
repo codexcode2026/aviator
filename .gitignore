@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Verification / scratch screenshots (regenerated locally)
+**/docs/screenshots/
+**/shots/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env / local
+*.local
+.env
+.env.*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
