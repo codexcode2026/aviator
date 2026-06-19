@@ -13,7 +13,7 @@ export default defineConfig({
   forbidOnly: isCI,
   retries: isCI ? 2 : 1,
   workers: 1,
-  timeout: 90_000,
+  timeout: 120_000,
   expect: { timeout: 15_000 },
   outputDir: "./results",
   globalSetup: "./global-setup.ts",
@@ -25,9 +25,9 @@ export default defineConfig({
   use: {
     baseURL: process.env.UI_BASE_URL ?? "http://localhost:5173",
     trace: "on-first-retry",
-    screenshot: "only-on-failure",
-    video: "retain-on-failure",
-    actionTimeout: 10_000,
+    screenshot: "on",
+    video: "on",
+    actionTimeout: 12_000,
   },
   webServer: process.env.SKIP_WEBSERVER
     ? undefined

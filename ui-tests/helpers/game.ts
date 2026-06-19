@@ -1,8 +1,17 @@
 import type { Page, Locator } from "@playwright/test";
 import { sel, type GamePhase } from "./selectors";
 
+// ─── Navigation ────────────────────────────────────────────────────────────
+
 export async function gotoApp(page: Page) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.locator(sel.header).waitFor({ state: "visible" });
+  await page.locator(sel.gameCanvas).first().waitFor({ state: "visible" });
+}
+
+/** Reload app and wait for it to be fully ready. */
+export async function reloadApp(page: Page) {
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.locator(sel.header).waitFor({ state: "visible" });
   await page.locator(sel.gameCanvas).first().waitFor({ state: "visible" });
 }
@@ -83,4 +92,227 @@ export async function expectNoHorizontalOverflow(page: Page) {
     return doc.scrollWidth > doc.clientWidth + 2;
   });
   return overflow;
+}
+
+// ─── Balance helpers ────────────────────────────────────────────────────────
+
+export async function getBalanceValue(page: Page): Promise<number> {
+  const text = await page.locator(sel.balance).innerText();
+  return parseFloat(text.replace(/[^0-9.]/g, ""));
+}
+
+// ─── Console error capturing ────────────────────────────────────────────────
+
+export function attachConsoleErrorCapture(page: Page): () => string[] {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (msg) => {
+    if (msg.type() === "error") errors.push(msg.text());
+  });
+  return () => errors;
+}
+
+// ─── Canvas helpers ─────────────────────────────────────────────────────────
+
+/** Sample a pixel colour [r,g,b,a] at (x,y) from the first canvas element. */
+export async function sampleCanvasPixel(
+  page: Page,
+  x: number,
+  y: number,
+): Promise<[number, number, number, number]> {
+  return page.evaluate(
+    ([px, py]) => {
+      const canvas = document.querySelector(
+        "[data-phase] canvas",
+      ) as HTMLCanvasElement | null;
+      if (!canvas) return [0, 0, 0, 0];
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return [0, 0, 0, 0];
+      const d = ctx.getImageData(px, py, 1, 1).data;
+      return [d[0], d[1], d[2], d[3]] as [number, number, number, number];
+    },
+    [x, y] as [number, number],
+  );
+}
+
+/** Returns true if the canvas has any non-black pixels (i.e. is drawing). */
+export async function canvasIsDrawing(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const canvas = document.querySelector(
+      "[data-phase] canvas",
+    ) as HTMLCanvasElement | null;
+    if (!canvas) return false;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return false;
+    const w = canvas.width;
+    const h = canvas.height;
+    if (!w || !h) return false;
+    const data = ctx.getImageData(0, 0, w, h).data;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 20) return true;
+    }
+    return false;
+  });
+}
+
+/** Get canvas logical dimensions. */
+export async function getCanvasDimensions(
+  page: Page,
+): Promise<{ w: number; h: number; cssW: number; cssH: number }> {
+  return page.evaluate(() => {
+    const c = document.querySelector(
+      "[data-phase] canvas",
+    ) as HTMLCanvasElement | null;
+    if (!c) return { w: 0, h: 0, cssW: 0, cssH: 0 };
+    return {
+      w: c.width,
+      h: c.height,
+      cssW: c.offsetWidth,
+      cssH: c.offsetHeight,
+    };
+  });
+}
+
+// ─── Animation helpers ──────────────────────────────────────────────────────
+
+/**
+ * Poll whether a GSAP-animated element is mid-tween by comparing its transform
+ * at two successive rAF ticks. Returns true if the transform changed.
+ */
+export async function elementIsAnimating(
+  page: Page,
+  selector: string,
+  samplesMs = 200,
+): Promise<boolean> {
+  const before = await page.locator(selector).evaluate((el) => {
+    return (el as HTMLElement).style.transform;
+  });
+  await page.waitForTimeout(samplesMs);
+  const after = await page.locator(selector).evaluate((el) => {
+    return (el as HTMLElement).style.transform;
+  });
+  return before !== after;
+}
+
+/**
+ * Measure how many distinct transform values the plane element takes during
+ * `durationMs`. A value > 1 confirms the plane is being repositioned.
+ */
+export async function countPlanePositionChanges(
+  page: Page,
+  durationMs = 500,
+): Promise<number> {
+  return page.evaluate((ms) => {
+    return new Promise<number>((resolve) => {
+      const plane = document.querySelector(
+        ".pointer-events-none.absolute.left-0.top-0.z-20",
+      ) as HTMLElement | null;
+      if (!plane) { resolve(0); return; }
+      const seen = new Set<string>();
+      const poll = () => seen.add(plane.style.transform);
+      const id = setInterval(poll, 16);
+      setTimeout(() => { clearInterval(id); resolve(seen.size); }, ms);
+    });
+  }, durationMs);
+}
+
+/**
+ * Capture whether the sunburst rays element has a non-zero rotation (set by GSAP).
+ */
+export async function getRaysRotation(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const el = document.querySelector(
+      "[class*='pointer-events-none'][class*='absolute'][class*='transition-opacity']",
+    ) as HTMLElement | null;
+    if (!el) return 0;
+    const t = el.style.transform;
+    const m = t.match(/rotate\(([\d.]+)deg\)/);
+    return m ? parseFloat(m[1]) : 0;
+  });
+}
+
+// ─── WebSocket event capture ────────────────────────────────────────────────
+
+/** Subscribe to a named socket.io event emitted from the page context.
+ *  Returns an accessor that returns collected payloads so far. */
+export function captureSocketEvents(
+  page: Page,
+  ...events: string[]
+): () => Promise<Array<{ event: string; data: unknown }>> {
+  const captured: Array<{ event: string; data: unknown }> = [];
+
+  page.on("websocket", (ws) => {
+    ws.on("framereceived", (frame) => {
+      try {
+        const raw = frame.payload.toString();
+        if (!raw.startsWith("42")) return;
+        const json = JSON.parse(raw.slice(2));
+        if (Array.isArray(json) && events.includes(json[0])) {
+          captured.push({ event: json[0], data: json[1] });
+        }
+      } catch { /* non-JSON frame — ignore */ }
+    });
+  });
+
+  return async () => [...captured];
+}
+
+// ─── Multiplier monitoring ───────────────────────────────────────────────────
+
+/** Poll the live multiplier from the DOM (not from the store). */
+export async function getLiveMultiplier(page: Page): Promise<number> {
+  const text = await page
+    .locator('[data-phase="flying"] .tabular-nums')
+    .first()
+    .innerText()
+    .catch(() => "0x");
+  return parseFloat(text.replace("x", "")) || 0;
+}
+
+/** Wait until the multiplier exceeds `target` (useful in flying phase). */
+export async function waitForMultiplierAbove(
+  page: Page,
+  target: number,
+  timeout = 30_000,
+): Promise<void> {
+  await page.waitForFunction(
+    (t) => {
+      const el = document.querySelector('[data-phase="flying"] .tabular-nums');
+      return parseFloat(el?.textContent ?? "0") > t;
+    },
+    target,
+    { timeout },
+  );
+}
+
+// ─── Toast helpers ───────────────────────────────────────────────────────────
+
+/** Wait for the win-toast to appear and return its text content. */
+export async function waitForWinToast(
+  page: Page,
+  timeout = 10_000,
+): Promise<string> {
+  const toast = page.locator(".absolute.left-1\\/2.top-3");
+  await toast.waitFor({ state: "visible", timeout });
+  return toast.innerText();
+}
+
+// ─── Network helpers ─────────────────────────────────────────────────────────
+
+/** Confirm the backend REST health endpoint is reachable. */
+export async function fetchApiHealth(
+  page: Page,
+): Promise<{ status: string; phase: string }> {
+  return page.evaluate(async () => {
+    const r = await fetch("http://localhost:4000/api/health");
+    return r.json();
+  });
+}
+
+/** Fetch public game state from the backend REST endpoint. */
+export async function fetchApiState(page: Page): Promise<Record<string, unknown>> {
+  return page.evaluate(async () => {
+    const r = await fetch("http://localhost:4000/api/state");
+    return r.json();
+  });
 }
