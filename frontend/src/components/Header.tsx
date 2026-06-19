@@ -7,7 +7,10 @@ export function Header() {
   const currency = useGame((s) => s.currency);
 
   return (
-    <header className="flex shrink-0 items-center justify-between border-b border-brand/50 bg-[#1b1d1f] px-3 py-1.5 sm:px-5">
+    <header
+      data-testid="header"
+      className="flex shrink-0 items-center justify-between border-b border-brand/50 bg-[#1b1d1f] px-3 py-1.5 sm:px-5"
+    >
       <Logo className="h-[26px] sm:h-[30px]" />
       <div className="flex items-baseline gap-1">
         <span className="text-[14px] font-bold text-balance sm:text-[16px]">

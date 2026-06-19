@@ -113,6 +113,39 @@
         "cwd": "${workspaceFolder}/frontend"
       },
       "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "Aviator: UI Tests (fast)",
+      "detail": "Playwright — desktop + tablet + mobile (~5 min)",
+      "type": "shell",
+      "command": "npm run test:ui",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Aviator: UI Tests (full)",
+      "detail": "Includes slow round-wait E2E tests",
+      "type": "shell",
+      "command": "npm run test:ui:full",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Aviator: UI Test Report",
+      "type": "shell",
+      "command": "npm run test:ui:report",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
     }
   ]
 }

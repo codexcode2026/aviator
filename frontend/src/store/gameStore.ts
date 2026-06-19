@@ -82,11 +82,12 @@ export const useGame = create<GameState>((set, get) => ({
     const p = s.panels[panel];
     if (p.active || p.queued) return;
     if (p.amount > s.balance) return;
-    socket.emit("bet:place", { panel, amount: p.amount });
-    // If we're mid-round, the bet is queued for next round.
     if (s.phase === "betting") {
+      // Live betting window: send to the server immediately.
+      socket.emit("bet:place", { panel, amount: p.amount });
       get().setPanel(panel, { active: true });
     } else {
+      // Mid-round: hold locally and let the next round:betting handler place it.
       get().setPanel(panel, { queued: true });
     }
   },
@@ -127,19 +128,21 @@ export const useGame = create<GameState>((set, get) => ({
     );
 
     socket.on("round:betting", (st: PublicRoundState) => {
+      // Remember which panels wanted to bet this round (queued last round or auto).
+      const prev = get().panels;
+      const wantsBet = prev.map((p) => p.queued || p.autoBet);
+
       set((s) => {
-        // New round: promote queued bets to active, reset cashout flags.
-        const panels = s.panels.map((p) => {
-          const next = { ...p };
-          if (next.queued) {
-            next.queued = false;
-            next.active = true;
-          }
-          next.cashedOut = false;
-          next.cashedOutAt = null;
-          next.win = null;
-          return next;
-        }) as [PanelState, PanelState];
+        // New round: clear all per-round flags. Queued/auto bets are (re)placed
+        // below via placeBet so the server actually registers them.
+        const panels = s.panels.map((p) => ({
+          ...p,
+          active: false,
+          queued: false,
+          cashedOut: false,
+          cashedOutAt: null,
+          win: null,
+        })) as [PanelState, PanelState];
         return {
           phase: "betting",
           roundId: st.roundId,
@@ -154,10 +157,9 @@ export const useGame = create<GameState>((set, get) => ({
         };
       });
 
-      // Auto-bet: re-place bets flagged for auto.
-      const s2 = get();
-      s2.panels.forEach((p, i) => {
-        if (p.autoBet && !p.active && p.amount <= get().balance) {
+      // Place queued + auto bets now that we're in the live betting window.
+      wantsBet.forEach((want, i) => {
+        if (want && prev[i].amount <= get().balance) {
           get().placeBet(i as 0 | 1);
         }
       });

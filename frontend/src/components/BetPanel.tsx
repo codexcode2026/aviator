@@ -78,7 +78,10 @@ export function BetPanel({
     action === "waiting" || (action === "bet" && (insufficient || autoLocked));
 
   return (
-    <div className="rounded-[18px] border border-[#242629] bg-[#1b1d1f] p-2">
+    <div
+      data-testid={`bet-panel-${index}`}
+      className="rounded-[18px] border border-[#242629] bg-[#1b1d1f] p-2"
+    >
       {/* Mode tabs + add/remove panel control */}
       <div className="relative mb-2 flex items-center justify-center">
         <div className="flex min-w-[156px] rounded-full bg-[#101113] p-0.5 max-[380px]:min-w-[132px]">
@@ -277,9 +280,8 @@ export function BetPanel({
                     });
                 }}
                 inputMode="decimal"
-                className="w-9 bg-transparent text-right text-[12px] font-bold text-white outline-none disabled:cursor-not-allowed"
+                className="w-11 bg-transparent text-right text-[12px] font-bold text-white outline-none disabled:cursor-not-allowed"
               />
-              <span className="text-white/40">x</span>
               <button
                 onClick={() =>
                   setPanel(index, { autoCashOut: false, autoCashOutValue: 1.1 })

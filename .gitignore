@@ -20,4 +20,7 @@ npm-debug.log*
 
 # OS / editor cruft
 .DS_Store
-Thumbs.db
+# Playwright UI tests
+ui-tests/results/
+ui-tests/report/
+ui-tests/specs/**/*.png

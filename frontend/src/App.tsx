@@ -14,25 +14,31 @@ export default function App() {
   }, [init]);
 
   return (
-    <div className="flex min-h-full w-full flex-col bg-[#1b1d1f]">
+    <div className="flex min-h-full w-full flex-col bg-[#1b1d1f] md:h-screen md:overflow-hidden">
       <Header />
 
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         {/* Desktop / tablet sidebar */}
-        <aside className="hidden w-[280px] shrink-0 md:block">
+        <aside
+          data-testid="sidebar-desktop"
+          className="hidden w-[360px] shrink-0 md:block"
+        >
           <LiveBets />
         </aside>
 
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main data-testid="main-content" className="flex min-w-0 flex-1 flex-col">
           <HistoryBar />
-          <div className="px-1">
+          <div className="px-1 md:flex md:min-h-0 md:flex-1 md:flex-col">
             <GameCanvas />
           </div>
           <BetPanels />
         </main>
 
-        {/* Mobile: live bets below main content */}
-        <aside className="min-h-[220px] flex-1 border-t border-[#212226] md:hidden">
+        {/* Mobile: live bets below main content — bounded box that scrolls internally */}
+        <aside
+          data-testid="sidebar-mobile"
+          className="h-[78vh] shrink-0 border-t border-[#212226] md:hidden"
+        >
           <LiveBets />
         </aside>
       </div>

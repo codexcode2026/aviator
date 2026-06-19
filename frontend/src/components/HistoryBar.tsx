@@ -13,7 +13,7 @@ export function HistoryBar() {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="relative px-1 py-1">
+    <div data-testid="history-bar" className="relative z-50 px-1 py-1">
       <div className="flex items-center gap-2 rounded-xl bg-black px-2.5 py-1.5">
         <div className="no-scrollbar flex flex-1 items-center gap-3 overflow-x-auto">
           {history.map((h) => (
@@ -40,7 +40,7 @@ export function HistoryBar() {
       </div>
 
       {open && (
-        <div className="absolute right-1 top-9 z-30 w-[280px] rounded-lg border border-[#2a2b2f] bg-[#1b1c20] p-3 shadow-2xl sm:w-[340px]">
+        <div className="absolute right-1 top-9 z-[60] w-[280px] rounded-lg border border-[#2a2b2f] bg-[#1b1c20] p-3 shadow-2xl sm:w-[340px]">
           <p className="mb-2 text-[11px] uppercase tracking-wide text-white/50">
             Round history
           </p>
