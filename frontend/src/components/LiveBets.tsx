@@ -15,12 +15,9 @@ const tierColor: Record<string, string> = {
   high: "text-high",
 };
 
-/** Shared column grid so headers and rows line up perfectly.
- *  Narrower fixed columns on small screens so the Player column never collapses. */
 const COLS =
   "grid grid-cols-[minmax(0,1fr)_68px_46px_72px] items-center gap-1.5 sm:grid-cols-[minmax(0,1fr)_92px_60px_92px] sm:gap-2";
 
-/** Deterministic 0..1 pseudo-random from a string seed (stable across renders). */
 function seeded(str: string, salt = 0): number {
   let h = 2166136261 ^ salt;
   for (let i = 0; i < str.length; i++) {
@@ -29,6 +26,155 @@ function seeded(str: string, salt = 0): number {
   const x = Math.sin(h) * 10000;
   return x - Math.floor(x);
 }
+
+/* ── Static pool of 60 realistic players ─────────────────────────────────── */
+const PLAYER_POOL = [
+  { name: "Lethabo_M",    avatar: 0  },
+  { name: "ThaboK",       avatar: 1  },
+  { name: "Sipho99",      avatar: 2  },
+  { name: "NomvulaZ",     avatar: 3  },
+  { name: "lucky_strike", avatar: 4  },
+  { name: "KelesoG",      avatar: 5  },
+  { name: "BonganiX",     avatar: 6  },
+  { name: "ZaneleD",      avatar: 7  },
+  { name: "MikeT_ZA",     avatar: 8  },
+  { name: "AyandaN",      avatar: 9  },
+  { name: "TebogoW",      avatar: 10 },
+  { name: "FatimahR",     avatar: 11 },
+  { name: "highroller88", avatar: 0  },
+  { name: "NhlanhlaB",    avatar: 2  },
+  { name: "SibusoS",      avatar: 3  },
+  { name: "Gugu_plays",   avatar: 4  },
+  { name: "RefilweMO",    avatar: 5  },
+  { name: "DikelediP",    avatar: 6  },
+  { name: "MahlatseMN",   avatar: 7  },
+  { name: "ProPlayerZA",  avatar: 8  },
+  { name: "Mpho_T",       avatar: 9  },
+  { name: "LindiweMC",    avatar: 10 },
+  { name: "TshepoNR",     avatar: 11 },
+  { name: "AceGambler",   avatar: 1  },
+  { name: "KaraboFF",     avatar: 3  },
+  { name: "PreciousNK",   avatar: 5  },
+  { name: "big_win_sa",   avatar: 6  },
+  { name: "SelloMK",      avatar: 7  },
+  { name: "NomceboTZ",    avatar: 8  },
+  { name: "ThulisileP",   avatar: 9  },
+  { name: "DevilDarts",   avatar: 0  },
+  { name: "KhumoB",       avatar: 2  },
+  { name: "YusufRA",      avatar: 4  },
+  { name: "crash_king",   avatar: 5  },
+  { name: "MasegoNO",     avatar: 6  },
+  { name: "TebelloKK",    avatar: 7  },
+  { name: "ZithuleleM",   avatar: 8  },
+  { name: "BalungileN",   avatar: 9  },
+  { name: "Oratile_D",    avatar: 10 },
+  { name: "NoxoloBT",     avatar: 11 },
+  { name: "JabulaniSP",   avatar: 0  },
+  { name: "MokoenaRC",    avatar: 1  },
+  { name: "moonshot99",   avatar: 3  },
+  { name: "PumzaMB",      avatar: 4  },
+  { name: "SifoPD",       avatar: 5  },
+  { name: "BuhleNZ",      avatar: 6  },
+  { name: "TlotloGS",     avatar: 7  },
+  { name: "NkululekoM",   avatar: 8  },
+  { name: "AluphiweTA",   avatar: 9  },
+  { name: "rocketman_za", avatar: 10 },
+  { name: "MamelloKR",    avatar: 11 },
+  { name: "SinenhlaNB",   avatar: 0  },
+  { name: "OlwethuDZ",    avatar: 2  },
+  { name: "LungisaEM",    avatar: 3  },
+  { name: "NtsikiPB",     avatar: 4  },
+  { name: "KhanyisoTL",   avatar: 5  },
+  { name: "GcinileMH",    avatar: 6  },
+  { name: "MthunziKS",    avatar: 7  },
+  { name: "ZandisDG",     avatar: 8  },
+  { name: "ThabisileNP",  avatar: 9  },
+];
+
+/* Date labels per period */
+const DAY_DATES = [
+  "22.06.26","22.06.26","22.06.26","22.06.26","22.06.26",
+  "21.06.26","21.06.26","21.06.26","21.06.26","21.06.26",
+  "20.06.26","20.06.26","20.06.26","20.06.26","20.06.26",
+  "19.06.26","19.06.26","19.06.26","18.06.26","18.06.26",
+];
+const MONTH_DATES = [
+  "22.06.26","21.06.26","20.06.26","19.06.26","18.06.26",
+  "17.06.26","16.06.26","15.06.26","14.06.26","13.06.26",
+  "12.06.26","11.06.26","10.06.26","09.06.26","08.06.26",
+  "07.06.26","06.06.26","05.06.26","04.06.26","03.06.26",
+];
+const YEAR_DATES = [
+  "22.06.26","15.06.26","01.06.26","20.05.26","05.05.26",
+  "18.04.26","02.04.26","14.03.26","27.02.26","10.02.26",
+  "25.01.26","08.01.26","22.12.25","05.12.25","18.11.25",
+  "01.11.25","14.10.25","27.09.25","10.09.25","24.08.25",
+];
+
+/* Per-period stat ranges */
+const PERIOD_CFG = {
+  Day:   { betMin: 10,   betMax: 2500,  xMin: 1.08, xMax: 180,   roundsMin: 1,  roundsMax: 60  },
+  Month: { betMin: 50,   betMax: 8000,  xMin: 1.10, xMax: 850,   roundsMin: 10, roundsMax: 400 },
+  Year:  { betMin: 200,  betMax: 30000, xMin: 1.15, xMax: 8800,  roundsMin: 80, roundsMax: 3200 },
+} as const;
+
+interface TopEntry {
+  id: string;
+  name: string;
+  avatar: number;
+  date: string;
+  bet: number;
+  win: number;
+  result: number;
+  rounds: number;
+  roundMax: number;
+}
+
+function buildTopEntries(period: "Day" | "Month" | "Year"): TopEntry[] {
+  const cfg = PERIOD_CFG[period];
+  const dates = period === "Day" ? DAY_DATES : period === "Month" ? MONTH_DATES : YEAR_DATES;
+  return PLAYER_POOL.map((p, i) => {
+    const r1 = seeded(p.name, i + 1);
+    const r2 = seeded(p.name, i + 77);
+    const r3 = seeded(p.name, i + 199);
+    const r4 = seeded(p.name, i + 333);
+    const result    = cfg.xMin + r1 * (cfg.xMax - cfg.xMin);
+    const bet       = cfg.betMin + r2 * (cfg.betMax - cfg.betMin);
+    const roundMax  = cfg.xMin + r3 * (cfg.xMax - cfg.xMin) * 1.4;
+    const rounds    = Math.round(cfg.roundsMin + r4 * (cfg.roundsMax - cfg.roundsMin));
+    return {
+      id:       `top-${period}-${i}`,
+      name:     p.name,
+      avatar:   p.avatar,
+      date:     dates[i % dates.length],
+      bet:      Math.round(bet * 100) / 100,
+      win:      Math.round(bet * result * 100) / 100,
+      result:   Math.round(result * 100) / 100,
+      rounds,
+      roundMax: Math.round(roundMax * 100) / 100,
+    };
+  });
+}
+
+/* Hardcoded previous-round ghost bets — shown when live bets list is thin */
+const PREV_GHOST_BETS: LiveBet[] = Array.from({ length: 38 }, (_, i) => {
+  const p   = PLAYER_POOL[i % PLAYER_POOL.length];
+  const r1  = seeded(p.name, i + 500);
+  const r2  = seeded(p.name, i + 600);
+  const r3  = seeded(p.name, i + 700);
+  const bet = 20 + Math.round(r1 * 2980 * 100) / 100;
+  const won = r2 > 0.38;
+  const mx  = won ? (1.05 + r3 * 11) : null;
+  return {
+    id:          `ghost-${i}`,
+    name:        p.name,
+    avatar:      p.avatar,
+    bet,
+    win:         won && mx ? Math.round(bet * mx * 100) / 100 : null,
+    cashedOut:   won,
+    cashedOutAt: mx ? Math.round(mx * 100) / 100 : null,
+  };
+});
 
 export function LiveBets() {
   const bets = useGame((s) => s.bets);
@@ -168,26 +314,53 @@ function Previous({
   currency: string;
   result: number | null;
 }) {
-  const sorted = useMemo(
-    () =>
-      [...bets].sort((a, b) => {
-        if (a.cashedOut && !b.cashedOut) return -1;
-        if (!a.cashedOut && b.cashedOut) return 1;
-        return b.bet - a.bet;
-      }),
-    [bets],
-  );
+  const sorted = useMemo(() => {
+    // Merge live bets with ghost bets, deduplicated by name
+    const liveNames = new Set(bets.map((b) => b.name));
+    const ghosts = PREV_GHOST_BETS.filter((g) => !liveNames.has(g.name));
+    const combined = [...bets, ...ghosts];
+    combined.sort((a, b) => {
+      if (a.cashedOut && !b.cashedOut) return -1;
+      if (!a.cashedOut && b.cashedOut) return 1;
+      return b.bet - a.bet;
+    });
+    return combined;
+  }, [bets]);
+
+  const total    = sorted.length;
+  const settled  = sorted.filter((b) => b.cashedOut).length;
+  const totalWinAmt = sorted.reduce((s, b) => s + (b.win ?? 0), 0);
 
   return (
     <>
-      <div className="shrink-0 rounded-2xl bg-[#15171a] py-2.5 text-center">
-        <div className="text-[11px] text-white/45">Round Result</div>
-        <div
-          className={`text-[20px] font-extrabold leading-tight ${
-            result != null ? tierColor[multTier(result)] : "text-white"
-          }`}
-        >
-          {result != null ? `${result.toFixed(2)}x` : "—"}
+      <div className="shrink-0 rounded-2xl bg-[#15171a] px-3.5 py-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-[11px] text-white/45">Round Result</div>
+            <div
+              className={`text-[22px] font-extrabold leading-tight ${
+                result != null ? tierColor[multTier(result)] : "text-white"
+              }`}
+            >
+              {result != null ? `${result.toFixed(2)}x` : "—"}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-[18px] font-extrabold leading-none text-white">
+              {fmt(totalWinAmt)}
+            </div>
+            <div className="mt-1 text-[11px] text-white/40">Total win {currency}</div>
+          </div>
+        </div>
+        <div className="mt-2 flex items-center justify-between text-[11px] text-white/45">
+          <span><span className="font-bold text-white">{settled}</span>/{total} cashed out</span>
+          <span className="text-white/30">{Math.round(settled / Math.max(total,1) * 100)}% win rate</span>
+        </div>
+        <div className="mt-1.5 h-[3px] w-full overflow-hidden rounded-full bg-[#26292c]">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-[#1f9e2c] to-[#3fc94a] transition-[width] duration-500"
+            style={{ width: `${Math.max(0.04, settled / Math.max(total,1)) * 100}%` }}
+          />
         </div>
       </div>
 
@@ -263,19 +436,7 @@ function BetRow({ bet, forceResolved }: { bet: LiveBet; forceResolved?: boolean 
 
 /* --------------------------------- Top ----------------------------------- */
 
-interface TopEntry {
-  id: string;
-  name: string;
-  avatar: number;
-  date: string;
-  bet: number;
-  win: number;
-  result: number;
-  roundMax: number;
-}
-
 function Top({
-  bets,
   currency,
   metric,
   period,
@@ -289,47 +450,59 @@ function Top({
   onMetric: (m: (typeof topMetricTabs)[number]) => void;
   onPeriod: (p: (typeof topPeriodTabs)[number]) => void;
 }) {
-  const entries = useMemo<TopEntry[]>(() => {
-    const roundMax = 100 + Math.round(seeded(period, 7) * 4000) + 30.26;
-    return bets.map((b) => {
-      const r1 = seeded(b.id, period.length + 1);
-      const r2 = seeded(b.id, period.length + 99);
-      const result =
-        1.5 + r1 * (period === "Year" ? 3500 : period === "Month" ? 2200 : 1200);
-      const bet = 5 + Math.round(r2 * 1800 * 100) / 100;
-      return {
-        id: b.id,
-        name: b.name,
-        avatar: b.avatar,
-        date: "18.06.26",
-        bet,
-        win: Math.round(bet * result * 100) / 100,
-        result: Math.round(result * 100) / 100,
-        roundMax: Math.round(roundMax * 100) / 100,
-      };
-    });
-  }, [bets, period]);
+  const entries = useMemo(() => buildTopEntries(period as "Day" | "Month" | "Year"), [period]);
 
   const sorted = useMemo(() => {
     const arr = [...entries];
-    if (metric === "Win") arr.sort((a, b) => b.win - a.win);
-    else if (metric === "Rounds") arr.sort((a, b) => b.bet - a.bet);
-    else arr.sort((a, b) => b.result - a.result);
-    return arr.slice(0, 40);
+    if (metric === "Win")    arr.sort((a, b) => b.win    - a.win);
+    else if (metric === "Rounds") arr.sort((a, b) => b.rounds - a.rounds);
+    else                     arr.sort((a, b) => b.result - a.result);
+    return arr;
   }, [entries, metric]);
+
+  const topResult = sorted[0]?.result ?? 0;
+  const topWin    = sorted[0]?.win    ?? 0;
 
   return (
     <>
       <div className="shrink-0 space-y-1.5">
+        {/* Summary strip */}
+        <div className="flex gap-1.5">
+          <div className="flex-1 rounded-2xl bg-[#15171a] px-3 py-2 text-center">
+            <div className="text-[11px] text-white/40">Best X</div>
+            <div className={`text-[15px] font-extrabold tabular-nums ${tierColor[multTier(topResult)]}`}>
+              {topResult.toFixed(2)}x
+            </div>
+          </div>
+          <div className="flex-1 rounded-2xl bg-[#15171a] px-3 py-2 text-center">
+            <div className="text-[11px] text-white/40">Top Win</div>
+            <div className="text-[15px] font-extrabold tabular-nums text-white">
+              {fmt(topWin)}
+            </div>
+          </div>
+          <div className="flex-1 rounded-2xl bg-[#15171a] px-3 py-2 text-center">
+            <div className="text-[11px] text-white/40">Players</div>
+            <div className="text-[15px] font-extrabold tabular-nums text-white">
+              {sorted.length}
+            </div>
+          </div>
+        </div>
         <SubTabs items={topMetricTabs} active={metric} onChange={onMetric} />
         <SubTabs items={topPeriodTabs} active={period} onChange={onPeriod} />
       </div>
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        {sorted.map((e) => (
+        {sorted.map((e, rank) => (
           <div key={e.id} className="mb-1.5 rounded-[14px] bg-[#15171a] px-3 py-2.5">
             <div className="mb-1.5 flex items-center justify-between">
               <div className="flex items-center gap-2">
+                {/* Rank badge */}
+                <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-extrabold ${
+                  rank === 0 ? "bg-[#f6d365] text-black" :
+                  rank === 1 ? "bg-[#c0c0c0] text-black" :
+                  rank === 2 ? "bg-[#cd7f32] text-black" :
+                  "bg-[#23262a] text-white/50"
+                }`}>{rank + 1}</span>
                 <Avatar id={e.avatar} size={24} />
                 <div className="leading-tight">
                   <div className="text-[12px] text-white/85">{e.name}</div>
@@ -351,19 +524,19 @@ function Top({
               <Cell label={`Bet ${currency}`} value={fmt(e.bet)} />
               <Cell
                 label="Result"
-                value={`${fmt(e.result)}x`}
+                value={`${e.result.toFixed(2)}x`}
                 valueClass={tierColor[multTier(e.result)]}
                 align="right"
               />
               <Cell
                 label={`Win ${currency}`}
                 value={fmt(e.win)}
-                valueClass="text-white/80"
+                valueClass="text-green-2"
               />
               <Cell
-                label="Round max."
-                value={`${fmt(e.roundMax)}x`}
-                valueClass="text-high"
+                label={metric === "Rounds" ? "Rounds" : "Round max."}
+                value={metric === "Rounds" ? String(e.rounds) : `${e.roundMax.toFixed(2)}x`}
+                valueClass={metric === "Rounds" ? "text-white/70" : "text-high"}
                 align="right"
               />
             </div>

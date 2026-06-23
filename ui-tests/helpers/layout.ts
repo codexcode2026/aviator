@@ -38,7 +38,7 @@ export async function expectFullUiManifest(page: Page) {
 
   const checks: { name: string; locator: Locator }[] = [
     { name: "header logo", locator: page.locator(`${sel.header} ${sel.logo}`) },
-    { name: "balance", locator: page.locator(`${sel.header} .text-balance`) },
+    { name: "balance", locator: page.locator(`[data-testid="header-balance"]`) },
     { name: "currency", locator: page.locator(`${sel.header} [class*="text-white/55"]`).last() },
     { name: "history bar", locator: page.locator(sel.historyBar) },
     { name: "history clock", locator: page.getByRole("button", { name: "History" }) },

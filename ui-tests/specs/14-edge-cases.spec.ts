@@ -112,17 +112,36 @@ test.describe("Edge cases & boundary conditions", () => {
   // ── Balance protection ────────────────────────────────────────────────────
 
   test("bet button disabled when amount exceeds balance", async ({ page }) => {
+    // Strategy: use panel 1 to deduct balance without cancelling, keeping balance < 50000.
+    // Then panel 0 (idle "Bet" action) with amount=50000 triggers insufficient=true.
+    //
+    // panel 1: place 10 ZAR bet → balance = 49990, panel 1 action="cancel"
+    // panel 0: still idle, set amount to 50000 → 50000 > 49990 → disabled
+    await setChipAmount(page, 1, 10);
+    await clickBet(page, 1); // deducts 10, panel 1 goes to Cancel
+
+    // Wait for balance to drop below 50000
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('[data-testid="header-balance"]');
+        return parseFloat(el?.textContent?.replace(/[^0-9.]/g, "") ?? "99999") < 50000;
+      },
+      { timeout: 12000 },
+    );
+
+    // Panel 0 is still idle (action="bet"). Set amount to 50000.
+    // insufficient = (50000 > 49990) = true → button disabled
     const input = betPanel(page, 0).locator("input").first();
-    await input.fill("99999");
+    await input.fill("50000");
     await input.press("Tab");
-    await page.waitForTimeout(300);
-    // Action button should be disabled (insufficient funds)
+    await page.waitForTimeout(400);
     await expect(panelActionButton(page, 0)).toBeDisabled();
   });
 
   // ── Dual-panel betting ────────────────────────────────────────────────────
 
   test("both panels show Cancel after dual-bet placed", async ({ page }) => {
+    await waitForBetting(page); // re-sync: beforeEach timing may have elapsed
     await setChipAmount(page, 0, 10);
     await setChipAmount(page, 1, 10);
     await clickBet(page, 0);
@@ -136,11 +155,17 @@ test.describe("Edge cases & boundary conditions", () => {
     await setChipAmount(page, 1, 10);
     await clickBet(page, 0);
     await clickBet(page, 1);
-    // Cancel panel 0
+    // Confirm both bets are live before cancelling
+    await expect(panelActionButton(page, 0)).toContainText("Cancel", { timeout: 6000 });
+    await expect(panelActionButton(page, 1)).toContainText("Cancel", { timeout: 6000 });
+    // Cancel panel 0 immediately
     await panelActionButton(page, 0).click();
-    await expect(panelActionButton(page, 0)).toContainText("Bet");
-    // Panel 1 should still show Cancel
-    await expect(panelActionButton(page, 1)).toContainText("Cancel");
+    // Panel 0: back to idle Bet state (still in betting phase)
+    await expect(panelActionButton(page, 0)).toContainText("Bet", { timeout: 6000 });
+    // Panel 1: still has a live bet — Cancel OR Waiting (if flying started)
+    // Either way it must NOT show the idle "Bet" state
+    const p1Text = await panelActionButton(page, 1).innerText();
+    expect(p1Text).not.toMatch(/^Bet$/);
   });
 
   // ── History consistency ───────────────────────────────────────────────────

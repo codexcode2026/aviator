@@ -243,6 +243,7 @@ export function BetPanel({
           <label className="flex items-center gap-2">
             <span className="text-white/70">Auto bet</span>
             <Toggle
+              label="Auto bet"
               on={panel.autoBet}
               onChange={(v) => {
                 setPanel(index, { autoBet: v });
@@ -261,6 +262,7 @@ export function BetPanel({
           <div className="flex items-center gap-2">
             <span className="text-white/70">Auto Cash Out</span>
             <Toggle
+              label="Auto cash out"
               on={panel.autoCashOut}
               onChange={(v) => setPanel(index, { autoCashOut: v })}
             />
@@ -302,7 +304,7 @@ export function BetPanel({
   );
 }
 
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+function Toggle({ on, onChange, label = "Toggle" }: { on: boolean; onChange: (v: boolean) => void; label?: string }) {
   return (
     <button
       onClick={() => onChange(!on)}
@@ -310,6 +312,7 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
         on ? "bg-green-2" : "bg-[#3a3b40]"
       }`}
       aria-pressed={on}
+      aria-label={label}
     >
       <span
         className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${

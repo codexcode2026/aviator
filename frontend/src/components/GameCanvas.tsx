@@ -284,6 +284,8 @@ export function GameCanvas() {
       {/* Bold black-ray sunburst converging at the bottom-left corner */}
       <div
         ref={raysRef}
+        data-testid="sunburst-rays"
+        data-opacity={phase === "betting" ? "0" : "0.78"}
         className="pointer-events-none absolute transition-opacity duration-500"
         style={{
           width: "300%",

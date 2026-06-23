@@ -1,19 +1,34 @@
 import type { Page, Locator } from "@playwright/test";
 import { sel, type GamePhase } from "./selectors";
 
+// Default test credentials used by existing game specs.
+const TEST_EMAIL    = "player1@aviator.local";
+const TEST_PASSWORD = "Player1@2026!";
+
+/** Auto-login if login screen is shown, then wait for header + canvas. */
+async function ensureLoggedIn(page: Page) {
+  const loginScreen = page.locator('[data-testid="login-screen"]');
+  const isLogin = await loginScreen.isVisible().catch(() => false);
+  if (isLogin) {
+    await page.locator('[data-testid="login-email"]').fill(TEST_EMAIL);
+    await page.locator('[data-testid="login-password"]').fill(TEST_PASSWORD);
+    await page.locator('[data-testid="login-submit"]').click();
+  }
+  await page.locator(sel.header).waitFor({ state: "visible", timeout: 15_000 });
+  await page.locator(sel.gameCanvas).first().waitFor({ state: "visible", timeout: 10_000 });
+}
+
 // ─── Navigation ────────────────────────────────────────────────────────────
 
 export async function gotoApp(page: Page) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.locator(sel.header).waitFor({ state: "visible" });
-  await page.locator(sel.gameCanvas).first().waitFor({ state: "visible" });
+  await ensureLoggedIn(page);
 }
 
 /** Reload app and wait for it to be fully ready. */
 export async function reloadApp(page: Page) {
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.locator(sel.header).waitFor({ state: "visible" });
-  await page.locator(sel.gameCanvas).first().waitFor({ state: "visible" });
+  await ensureLoggedIn(page);
 }
 
 export async function waitForPhase(
@@ -27,7 +42,7 @@ export async function waitForPhase(
     .waitFor({ state: "visible", timeout });
 }
 
-export async function waitForBetting(page: Page, timeout = 30_000) {
+export async function waitForBetting(page: Page, timeout = 65_000) {
   await waitForPhase(page, "betting", timeout);
   await page.waitForTimeout(300);
 }

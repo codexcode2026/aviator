@@ -30,11 +30,15 @@ interface GameState {
   flyingStartedAt: number | null;
   panels: [PanelState, PanelState];
   lastWinToast: { panel: number; mult: number; win: number; at: number } | null;
+  /** Authenticated user id — null for demo/guest. */
+  userId: string | null;
+  accessToken: string | null;
 
   setPanel: (panel: 0 | 1, patch: Partial<PanelState>) => void;
   placeBet: (panel: 0 | 1) => void;
   cancelBet: (panel: 0 | 1) => void;
   cashOut: (panel: 0 | 1) => void;
+  setAuth: (auth: { userId: string | null; accessToken: string | null }) => void;
   init: () => void;
 }
 
@@ -69,6 +73,10 @@ export const useGame = create<GameState>((set, get) => ({
   flyingStartedAt: null,
   panels: [defaultPanel(2), defaultPanel(2)],
   lastWinToast: null,
+  userId: null,
+  accessToken: null,
+
+  setAuth: ({ userId, accessToken }) => set({ userId, accessToken }),
 
   setPanel: (panel, patch) =>
     set((s) => {
@@ -82,12 +90,13 @@ export const useGame = create<GameState>((set, get) => ({
     const p = s.panels[panel];
     if (p.active || p.queued) return;
     if (p.amount > s.balance) return;
+    const userId = get().userId;
     if (s.phase === "betting") {
-      // Live betting window: send to the server immediately.
-      socket.emit("bet:place", { panel, amount: p.amount });
+      socket.emit("bet:place", { panel, amount: p.amount, ...(userId ? { userId } : {}) });
+      set({ balance: Math.round((s.balance - p.amount) * 100) / 100 });
       get().setPanel(panel, { active: true });
     } else {
-      // Mid-round: hold locally and let the next round:betting handler place it.
+      set({ balance: Math.round((s.balance - p.amount) * 100) / 100 });
       get().setPanel(panel, { queued: true });
     }
   },
@@ -95,12 +104,18 @@ export const useGame = create<GameState>((set, get) => ({
   cancelBet: (panel) => {
     const s = get();
     const p = s.panels[panel];
-    socket.emit("bet:cancelWithAmount", { panel, amount: p.amount });
+    const userId = s.userId;
+    set({ balance: Math.round((s.balance + p.amount) * 100) / 100 });
+    socket.emit("bet:cancelWithAmount", { panel, amount: p.amount, ...(userId ? { userId } : {}) });
     get().setPanel(panel, { active: false, queued: false });
   },
 
   cashOut: (panel) => {
-    socket.emit("bet:cashout", { panel });
+    const s = get();
+    const p = s.panels[panel];
+    if (!p.active || p.cashedOut) return;
+    const userId = s.userId;
+    socket.emit("bet:cashout", { panel, ...(userId ? { userId } : {}) });
   },
 
   init: () => {
@@ -204,20 +219,20 @@ export const useGame = create<GameState>((set, get) => ({
       (p: {
         multiplier: number;
         history: RoundHistoryItem[];
+        balance?: number;
       }) => {
         set((s) => {
-          const panels = s.panels.map((panel) => {
-            if (panel.active && !panel.cashedOut) {
-              // Lost this round.
-              return { ...panel, active: false };
-            }
-            return { ...panel, active: false };
-          }) as [PanelState, PanelState];
+          const panels = s.panels.map((panel) => ({
+            ...panel,
+            active: false,
+          })) as [PanelState, PanelState];
           return {
             phase: "crashed",
             multiplier: p.multiplier,
             history: p.history,
             crashFlash: { multiplier: p.multiplier, at: Date.now() },
+            // Sync authoritative balance if server sends it (covers lost bets).
+            ...(p.balance != null ? { balance: p.balance } : {}),
             panels,
           };
         });
@@ -227,20 +242,31 @@ export const useGame = create<GameState>((set, get) => ({
     socket.on(
       "bet:accepted",
       (p: { panel: 0 | 1; amount: number; balance: number }) => {
-        set({ balance: p.balance });
+        // Sync with authoritative server balance (corrects any optimistic drift).
+        if (p.balance != null) set({ balance: p.balance });
       },
     );
 
     socket.on(
       "bet:cancelled",
       (p: { panel: 0 | 1; balance?: number }) => {
+        // Server sends authoritative balance after refund — sync it.
         if (p.balance != null) set({ balance: p.balance });
         get().setPanel(p.panel, { active: false, queued: false });
       },
     );
 
-    socket.on("bet:rejected", (p: { panel: 0 | 1 }) => {
+    socket.on("bet:rejected", (p: { panel: 0 | 1; reason?: string }) => {
+      // Revert the optimistic balance deduction.
+      const s = get();
+      const panel = s.panels[p.panel];
+      set({ balance: Math.round((s.balance + panel.amount) * 100) / 100 });
       get().setPanel(p.panel, { active: false, queued: false });
+    });
+
+    // Server restores persistent balance after reconnect.
+    socket.on("balance:sync", (p: { balance: number }) => {
+      set({ balance: p.balance });
     });
 
     socket.on(

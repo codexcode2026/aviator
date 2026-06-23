@@ -209,10 +209,17 @@ test.describe("Accessibility & keyboard", () => {
   });
 
   test("sidebar provably-fair button has aria-label", async ({ page }) => {
-    const btn = page.getByRole("button", { name: "Provably fair" }).first();
-    await expect(btn).toBeVisible();
+    // IconBtn with aria-label="Provably fair" only renders inside the Top tab
+    const sidebar = page
+      .locator('[data-testid="sidebar-desktop"], [data-testid="sidebar-mobile"]')
+      .first();
+    await sidebar.getByRole("button", { name: "Top", exact: true }).click();
+    const btn = sidebar
+      .getByRole("button", { name: "Provably fair" })
+      .first();
+    await expect(btn).toBeVisible({ timeout: 5000 });
     const label = await btn.getAttribute("aria-label");
-    expect(label).toBeTruthy();
+    expect(label).toBe("Provably fair");
   });
 
   test("merge/add panel buttons have descriptive aria-labels", async ({

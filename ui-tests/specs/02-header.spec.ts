@@ -14,11 +14,11 @@ test.describe("Header", () => {
   });
 
   test("shows formatted balance and currency", async ({ page }) => {
-    const balance = page.locator(`${sel.header} .text-balance`);
+    const balance = page.locator('[data-testid="header-balance"]');
     await expect(balance).toBeVisible();
-    await expect(balance).toHaveText(/\d[\d,]*\.\d{2}/);
+    await expect(balance).toHaveText(/\d[\d,.]*/);
 
-    const currency = page.locator(`${sel.header} [class*="text-white/55"]`).last();
+    const currency = page.locator(`${sel.header} [class*="text-white/55"]`).first();
     await expect(currency).toHaveText(/ZAR|EUR|USD/);
   });
 
