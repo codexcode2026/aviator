@@ -240,10 +240,35 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("bet:cancel", (payload: CashOutPayload) => {
-    const ok = engine.cancelBet(socket.id, payload.panel);
-    if (ok) {
-      socket.emit("bet:cancelled", { panel: payload.panel });
+  socket.on("bet:cancel", async (payload: CashOutPayload) => {
+    const { panel } = payload;
+    if (authedUserId && engine.supabaseRoundId) {
+      const bet = engine.getPlayerBet(socket.id, panel);
+      const amount = bet?.amount ?? 0;
+      const { data, error } = await supabase.rpc("cancel_bet", {
+        p_user_id: authedUserId,
+        p_round_id: engine.supabaseRoundId,
+        p_panel: panel,
+        p_reference: socket.id,
+      });
+      engine.cancelBet(socket.id, panel);
+      if (!error && (data as { ok: boolean }).ok) {
+        socket.emit("bet:cancelled", { panel, balance: (data as { balance?: number }).balance });
+      } else {
+        socket.emit("bet:cancelled", { panel });
+        void amount;
+      }
+    } else {
+      const bet = engine.getPlayerBet(socket.id, panel);
+      const ok = engine.cancelBet(socket.id, panel);
+      if (ok && bet) {
+        const balance = getDemoBalance();
+        const newBalance = Math.round((balance + bet.amount) * 100) / 100;
+        setDemoBalance(newBalance);
+        socket.emit("bet:cancelled", { panel, balance: newBalance });
+      } else if (ok) {
+        socket.emit("bet:cancelled", { panel });
+      }
     }
   });
 

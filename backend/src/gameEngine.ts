@@ -94,6 +94,11 @@ export class GameEngine extends EventEmitter {
     return this.userWinControls.get(userId) ?? null;
   }
 
+  /** Find an active bet by socket id and panel. Used by index.ts for cancel amount lookup. */
+  getPlayerBet(socketId: string, panel: 0 | 1): PlayerBet | null {
+    return this.playerBets.find(b => b.socketId === socketId && b.panel === panel) ?? null;
+  }
+
   /** Compute the effective crash point after applying admin overrides. */
   private computeCrashPoint(): number {
     // Forced crash wins over everything

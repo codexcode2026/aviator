@@ -19,11 +19,17 @@ function GameApp() {
   useEffect(() => {
     if (profile && session) {
       setAuth({ userId: profile.id, accessToken: session.access_token });
-      // Tell the backend who we are so it can push the real wallet balance.
-      socket.emit("auth:identify", {
-        userId: profile.id,
-        token: session.access_token,
-      });
+      // Identify to backend immediately.
+      const identify = () => {
+        socket.emit("auth:identify", {
+          userId: profile.id,
+          token: session.access_token,
+        });
+      };
+      // Send now if already connected, and re-send on every reconnect.
+      if (socket.connected) identify();
+      socket.on("connect", identify);
+      return () => { socket.off("connect", identify); };
     } else {
       setAuth({ userId: null, accessToken: null });
     }

@@ -90,12 +90,16 @@ export const useGame = create<GameState>((set, get) => ({
     const p = s.panels[panel];
     if (p.active || p.queued) return;
     if (p.amount > s.balance) return;
-    const userId = get().userId;
+    const userId = s.userId;
     if (s.phase === "betting") {
+      // Optimistically deduct only for demo users; authenticated users wait for server.
+      if (!userId) {
+        set({ balance: Math.round((s.balance - p.amount) * 100) / 100 });
+      }
       socket.emit("bet:place", { panel, amount: p.amount, ...(userId ? { userId } : {}) });
-      set({ balance: Math.round((s.balance - p.amount) * 100) / 100 });
       get().setPanel(panel, { active: true });
     } else {
+      // Queued: deduct optimistically so UI shows reduced balance immediately.
       set({ balance: Math.round((s.balance - p.amount) * 100) / 100 });
       get().setPanel(panel, { queued: true });
     }
@@ -105,7 +109,10 @@ export const useGame = create<GameState>((set, get) => ({
     const s = get();
     const p = s.panels[panel];
     const userId = s.userId;
-    set({ balance: Math.round((s.balance + p.amount) * 100) / 100 });
+    // For demo users refund optimistically; authenticated users get authoritative balance from server.
+    if (!userId) {
+      set({ balance: Math.round((s.balance + p.amount) * 100) / 100 });
+    }
     socket.emit("bet:cancelWithAmount", { panel, amount: p.amount, ...(userId ? { userId } : {}) });
     get().setPanel(panel, { active: false, queued: false });
   },
@@ -173,8 +180,20 @@ export const useGame = create<GameState>((set, get) => ({
       });
 
       // Place queued + auto bets now that we're in the live betting window.
+      // Note: queued bets already had their amount deducted from balance when queued,
+      // so we emit directly to avoid a double-deduction.
       wantsBet.forEach((want, i) => {
-        if (want && prev[i].amount <= get().balance) {
+        const s = get();
+        const p = s.panels[i];
+        const wasQueued = prev[i].queued; // was queued (balance already deducted)
+        if (!want) return;
+        const userId = s.userId;
+        if (wasQueued) {
+          // Re-place queued bet without another balance deduction.
+          socket.emit("bet:place", { panel: i, amount: p.amount, ...(userId ? { userId } : {}) });
+          s.setPanel(i as 0 | 1, { active: true, queued: false });
+        } else if (prev[i].autoBet && p.amount <= s.balance) {
+          // Auto bet — use normal placeBet which handles deduction.
           get().placeBet(i as 0 | 1);
         }
       });
@@ -257,10 +276,13 @@ export const useGame = create<GameState>((set, get) => ({
     );
 
     socket.on("bet:rejected", (p: { panel: 0 | 1; reason?: string }) => {
-      // Revert the optimistic balance deduction.
       const s = get();
       const panel = s.panels[p.panel];
-      set({ balance: Math.round((s.balance + panel.amount) * 100) / 100 });
+      // Revert optimistic deduction only for demo users (authenticated users
+      // never had it deducted — server sends authoritative balance via balance:sync).
+      if (!s.userId) {
+        set({ balance: Math.round((s.balance + panel.amount) * 100) / 100 });
+      }
       get().setPanel(p.panel, { active: false, queued: false });
     });
 
