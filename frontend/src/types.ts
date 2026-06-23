@@ -43,4 +43,6 @@ export interface PanelState {
   autoBet: boolean;
   autoCashOut: boolean;
   autoCashOutValue: number;
+  /** True when the active bet was placed via the authenticated (DB) path. */
+  betIsAuthenticated: boolean;
 }

@@ -54,6 +54,7 @@ function defaultPanel(amount: number): PanelState {
     autoBet: false,
     autoCashOut: false,
     autoCashOutValue: 1.1,
+    betIsAuthenticated: false,
   };
 }
 
@@ -91,17 +92,18 @@ export const useGame = create<GameState>((set, get) => ({
     if (p.active || p.queued) return;
     if (p.amount > s.balance) return;
     const userId = s.userId;
+    const isAuth = !!userId;
     if (s.phase === "betting") {
       // Optimistically deduct only for demo users; authenticated users wait for server.
-      if (!userId) {
+      if (!isAuth) {
         set({ balance: Math.round((s.balance - p.amount) * 100) / 100 });
       }
-      socket.emit("bet:place", { panel, amount: p.amount, ...(userId ? { userId } : {}) });
-      get().setPanel(panel, { active: true });
+      socket.emit("bet:place", { panel, amount: p.amount, ...(isAuth ? { userId } : {}) });
+      get().setPanel(panel, { active: true, betIsAuthenticated: isAuth });
     } else {
       // Queued: deduct optimistically so UI shows reduced balance immediately.
       set({ balance: Math.round((s.balance - p.amount) * 100) / 100 });
-      get().setPanel(panel, { queued: true });
+      get().setPanel(panel, { queued: true, betIsAuthenticated: isAuth });
     }
   },
 
@@ -109,11 +111,12 @@ export const useGame = create<GameState>((set, get) => ({
     const s = get();
     const p = s.panels[panel];
     const userId = s.userId;
-    // For demo users refund optimistically; authenticated users get authoritative balance from server.
-    if (!userId) {
+    // Use the path that matches how the bet was placed, not current auth state.
+    const isAuth = p.betIsAuthenticated && !!userId;
+    if (!isAuth) {
       set({ balance: Math.round((s.balance + p.amount) * 100) / 100 });
     }
-    socket.emit("bet:cancelWithAmount", { panel, amount: p.amount, ...(userId ? { userId } : {}) });
+    socket.emit("bet:cancelWithAmount", { panel, amount: p.amount, ...(isAuth ? { userId } : {}) });
     get().setPanel(panel, { active: false, queued: false });
   },
 
@@ -122,7 +125,10 @@ export const useGame = create<GameState>((set, get) => ({
     const p = s.panels[panel];
     if (!p.active || p.cashedOut) return;
     const userId = s.userId;
-    socket.emit("bet:cashout", { panel, ...(userId ? { userId } : {}) });
+    // Only send userId if the bet was PLACED as authenticated — prevents
+    // the backend trying to find a DB bet that doesn't exist.
+    const isAuth = p.betIsAuthenticated && !!userId;
+    socket.emit("bet:cashout", { panel, ...(isAuth ? { userId } : {}) });
   },
 
   init: () => {
@@ -164,6 +170,7 @@ export const useGame = create<GameState>((set, get) => ({
           cashedOut: false,
           cashedOutAt: null,
           win: null,
+          betIsAuthenticated: false,
         })) as [PanelState, PanelState];
         return {
           phase: "betting",
@@ -185,13 +192,14 @@ export const useGame = create<GameState>((set, get) => ({
       wantsBet.forEach((want, i) => {
         const s = get();
         const p = s.panels[i];
-        const wasQueued = prev[i].queued; // was queued (balance already deducted)
+        const wasQueued = prev[i].queued;
         if (!want) return;
         const userId = s.userId;
+        const isAuth = !!userId;
         if (wasQueued) {
           // Re-place queued bet without another balance deduction.
-          socket.emit("bet:place", { panel: i, amount: p.amount, ...(userId ? { userId } : {}) });
-          s.setPanel(i as 0 | 1, { active: true, queued: false });
+          socket.emit("bet:place", { panel: i, amount: p.amount, ...(isAuth ? { userId } : {}) });
+          s.setPanel(i as 0 | 1, { active: true, queued: false, betIsAuthenticated: isAuth });
         } else if (prev[i].autoBet && p.amount <= s.balance) {
           // Auto bet — use normal placeBet which handles deduction.
           get().placeBet(i as 0 | 1);
