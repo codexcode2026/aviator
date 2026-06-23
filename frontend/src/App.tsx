@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useGame } from "./store/gameStore";
+import { socket } from "./lib/socket";
 import { Header } from "./components/Header";
 import { HistoryBar } from "./components/HistoryBar";
 import { GameCanvas } from "./components/GameCanvas";
@@ -14,10 +15,15 @@ function GameApp() {
   const setAuth = useGame((s) => s.setAuth);
   const { session, profile, loading } = useAuth();
 
-  // Pass userId + token into the game store so socket events are authenticated
+  // Pass userId + token into the game store and identify to backend for wallet sync
   useEffect(() => {
     if (profile && session) {
       setAuth({ userId: profile.id, accessToken: session.access_token });
+      // Tell the backend who we are so it can push the real wallet balance.
+      socket.emit("auth:identify", {
+        userId: profile.id,
+        token: session.access_token,
+      });
     } else {
       setAuth({ userId: null, accessToken: null });
     }

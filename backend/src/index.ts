@@ -106,6 +106,12 @@ async function getWalletBalance(userId: string): Promise<number | null> {
   return Number(data.balance);
 }
 
+// Persistent demo balances keyed by stable client token (survives socket reconnect).
+const persistentBalances = new Map<string, number>();
+
+// Map from socket.id → authenticated userId (for authenticated sockets).
+const authedSockets = new Map<string, string>();
+
 function broadcast(event: string, payload: unknown) {
   io.emit(event, payload);
 }
@@ -114,25 +120,32 @@ engine.on("round:betting", (state) => broadcast("round:betting", state));
 engine.on("round:flying", (state) => broadcast("round:flying", state));
 engine.on("tick:countdown", (p) => broadcast("tick:countdown", p));
 engine.on("tick:multiplier", (p) => broadcast("tick:multiplier", p));
-engine.on("round:crashed", (p) => {
+engine.on("round:crashed", async (p) => {
   // Broadcast the crash to all clients first.
   broadcast("round:crashed", p);
-  // Then send each demo socket their authoritative balance
-  // (covers players who lost their bet this round).
+  // Sync authoritative balance to every connected socket.
   for (const [sid, socket] of io.sockets.sockets) {
-    const bal = demoBalances.get(sid);
-    if (bal != null) {
-      socket.emit("balance:sync", { balance: bal });
+    const userId = authedSockets.get(sid);
+    if (userId) {
+      // Authenticated user — fetch real wallet balance from DB.
+      const realBalance = await getWalletBalance(userId);
+      if (realBalance !== null) {
+        socket.emit("balance:sync", { balance: realBalance });
+      }
+    } else {
+      // Demo user — use in-memory balance.
+      const bal = demoBalances.get(sid);
+      if (bal != null) {
+        socket.emit("balance:sync", { balance: bal });
+      }
     }
   }
 });
 
-// Persistent demo balances keyed by stable client token (survives socket reconnect).
-const persistentBalances = new Map<string, number>();
-
 io.on("connection", (socket) => {
   // Client may send a stable token so balance persists across page refreshes.
   let clientToken: string | null = null;
+  let authedUserId: string | null = null;
 
   const getDemoBalance = () =>
     clientToken != null
@@ -150,6 +163,21 @@ io.on("connection", (socket) => {
     state: engine.publicState(),
     balance: getDemoBalance(),
     currency: "ZAR",
+  });
+
+  // Authenticated client identifies itself so we can push real wallet balance.
+  socket.on("auth:identify", async (payload: { userId: string; token: string }) => {
+    if (!payload?.userId || !payload?.token) return;
+    // Verify the token quickly via Supabase.
+    const { data: { user }, error } = await supabase.auth.getUser(payload.token);
+    if (error || !user || user.id !== payload.userId) return;
+    authedUserId = user.id;
+    authedSockets.set(socket.id, authedUserId);
+    // Push real wallet balance immediately.
+    const realBalance = await getWalletBalance(authedUserId);
+    if (realBalance !== null) {
+      socket.emit("balance:sync", { balance: realBalance });
+    }
   });
 
   // Client sends its stable token on connect so balance survives refresh.
@@ -307,6 +335,7 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     demoBalances.delete(socket.id);
+    authedSockets.delete(socket.id);
     // Note: persistentBalances is intentionally kept — it survives reconnects.
   });
 });
